@@ -33,7 +33,7 @@
 		CanStop := 0
 		MainHWND := "" ;window handle of the main thread (only set for worker threads)
 	}
-	__new(WorkerFunction, Parameters = "", CanPause = 0, CanStop = 0)
+	__new(WorkerFunction, CanPause = 0, CanStop = 0)
 	{
 		if(!FileExist(WorkerFunction))
 		{
@@ -41,11 +41,9 @@
 				throw new Exception("CWorkerThread: Invalid worker function: " WorkerFunction)
 			this.Task := new this.CTask()
 			this.Task.WorkerFunction := WorkerFunction
-			this.Task.Parameters := IsObject(Parameters) ? Parameters : []
 			this.Task.CanPause := CanPause
 			this.Task.CanStop := CanStop
 			this.Task.MainHWND := Format("{1:d}", A_ScriptHwnd)
-			this.Progress := 0
 			this.IsWorkerThread := false
 			loop 6
 				OnMessage(this.Message + (A_Index - 1), "MainThread_Monitor")
@@ -71,11 +69,13 @@
 				return ""
 		}
 	}
-	Start()
+	Start(Parameters*)
 	{
 		if(this.State != "Stopped" && this.State != "Finished" || this.IsWorkerThread)
 			return
-		;Serialize task object, run a new instance of this script, acquire PID, enabling monitoring function
+		
+		this.Task.Parameters := Parameters
+		this.Progress := 0
 		
 		;Write temporary file with object data (might be replaced with WM_COPYDATA later)
 		FileDelete, %A_Temp%\Workerthread.lson

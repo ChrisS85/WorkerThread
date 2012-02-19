@@ -12,7 +12,7 @@ Gui, +LabelMainGUI
 Gui, Show
 
 ;Create the worker thread! It will be reused in this program to demonstrate the possibility
-WorkerThread := new CWorkerThread("WorkerFunction", ["A Parameter!"], 1, 1)
+WorkerThread := new CWorkerThread("WorkerFunction", 1, 1)
 
 ;Setup event handlers for the main thread
 WorkerThread.OnPauseHandler.Handler := "OnPausedByWorker"
@@ -31,7 +31,7 @@ ExitApp
 MainStart:
 if(WorkerThread.State = "Stopped" || WorkerThread.State = "Finished")
 {
-	WorkerThread.Start() ;Starting works only when in stopped state. The progress is reset to zero.
+	WorkerThread.Start("A Parameter", "Another unused parameter") ;Starting works only when in stopped state. The progress is reset to zero.
 	GuiControl, Disable, MainStart
 	GuiControl, Enable, MainStop
 	GuiControl, Enable, MainPause
