@@ -4,12 +4,12 @@
 InitWorkerThread()
 ;Main thread continues here
 ;Create the worker thread!
-WorkerThread := new CWorkerThread("WorkerFunction", 0, 1)
+WorkerThread := new CWorkerThread("WorkerFunction", 0, 1, 1)
 
 ;Setup event handlers for the main thread
-WorkerThread.OnStopHandler.Handler := "OnStoppedByWorker"
-WorkerThread.ProgressHandler.Handler := "ProgressHandler"
-WorkerThread.OnFinishHandler.Handler := "OnFinish"
+WorkerThread.OnStop.Handler := "OnStoppedByWorker"
+WorkerThread.OnProgress.Handler := "ProgressHandler"
+WorkerThread.OnFinish.Handler := "OnFinish"
 
 ;Start the worker thread
 WorkerThread.Start("A Parameter")
@@ -21,6 +21,7 @@ OnStoppedByWorker(WorkerThread, Result)
 	Msgbox Error in worker thread! %Result%
 	ExitApp
 }
+
 OnFinish(WorkerThread, Result)
 {
 	MsgBox Worker thread completed successfully! %Result%
@@ -30,7 +31,6 @@ OnFinish(WorkerThread, Result)
 ;Progress is a numeric integer value
 ProgressHandler(WorkerThread, Progress)
 {
-	global ProgressBar
 	Tooltip, Progress: %Progress%
 }
 
@@ -50,7 +50,7 @@ WorkerFunction(WorkerThread, Param)
 		;Lets allow this thread to randomly fail!
 		Random, r, 1, 200
 		if(r = 1)
-			WorkerThread.Stop(r) ;Pass the error value to the main thread
+			WorkerThread.Stop("Error: " r) ;Pass the error value to the main thread
 	}
 	;the return value of this function is only used when the worker thread wasn't stopped.
 	return r

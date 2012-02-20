@@ -389,7 +389,10 @@ WorkerThread_OnStopOrFinish()
 	{
 		if((WorkerThread.State = "Stopped" || WorkerThread.State = "Finished") && WorkerThread.HasKey("Result"))
 		{
-			WorkerThread.OnStop.(WorkerThread, WorkerThread.Result)
+			if(WorkerThread.State = "Stopped")
+				WorkerThread.OnStop.(WorkerThread, WorkerThread.Result)
+			else
+				WorkerThread.OnFinish.(WorkerThread, WorkerThread.Result)
 			WorkerThread.Remove("Result")
 			if(WorkerThread.Task.ExitAfterTask)
 				RemovePIDs.Insert(pid)				
