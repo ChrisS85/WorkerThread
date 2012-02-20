@@ -7,24 +7,26 @@ Gui, Add, Progress, vProgressBar w400, 0
 Gui, Add, Button, vMainStart gMainStart y+10, Start
 Gui, Add, Button, vMainPause gMainPause x+10 w50 Disabled, Pause
 Gui, Add, Button, vMainStop gMainStop x+10 Disabled, Stop
+Gui, Add, Button, vMainData gMainData x+10 Disabled, Send Data
 
 Gui, +LabelMainGUI
 Gui, Show
 
 ;Create the worker thread! It will be reused in this program to demonstrate the possibility
-WorkerThread := new CWorkerThread("WorkerFunction", 1, 1)
+WorkerThread := new CWorkerThread("WorkerFunction", 1, 1, 1)
 
 ;Setup event handlers for the main thread
-WorkerThread.OnPauseHandler.Handler := "OnPausedByWorker"
-WorkerThread.OnResumeHandler.Handler := "OnResumedByWorker"
-WorkerThread.OnStopHandler.Handler := "OnStoppedByWorker"
-WorkerThread.ProgressHandler.Handler := "ProgressHandler"
-WorkerThread.OnFinishHandler.Handler := "OnFinish"
+WorkerThread.OnPause.Handler := "OnPausedByWorker"
+WorkerThread.OnResume.Handler := "OnResumedByWorker"
+WorkerThread.OnStop.Handler := "OnStoppedByWorker"
+WorkerThread.OnData.Handler := "OnDataFromWorker"
+WorkerThread.OnProgress.Handler := "ProgressHandler"
+WorkerThread.OnFinish.Handler := "OnFinish"
 return
 
 MainGUIClose:
 if(WorkerThread.State = "Running" || WorkerThread.State = "Paused")
-	WorkerThread.Stop(0) ;Stop the worker thread if it is still running
+	WorkerThread.Stop("Main thread exit") ;Stop the worker thread if it is still running
 ExitApp
 
 ;The main thread can control the execution of the worker thread, demonstrated by the event handlers of the buttons below:
@@ -35,6 +37,7 @@ if(WorkerThread.State = "Stopped" || WorkerThread.State = "Finished")
 	GuiControl, Disable, MainStart
 	GuiControl, Enable, MainStop
 	GuiControl, Enable, MainPause
+	GuiControl, Enable, MainData
 	Gui, Show,, Running
 }
 return
@@ -55,15 +58,21 @@ else if(WorkerThread.State = "Running")
 return
 
 MainStop:
-if(WorkerThread.State = "Running")
+if(WorkerThread.State = "Running" || WorkerThread.State = "Paused")
 {
-	WorkerThread.Stop(1) ;We can pass a reason for the stop to the worker thread
+	WorkerThread.Stop("Stop running, worker!") ;We can pass a reason for the stop to the worker thread
 	GuiControl, Disable, MainStop
+	GuiControl, Disable, MainPause
+	GuiControl, Disable, MainData
 	GuiControl, Enable, MainStart
 	Gui, Show,,Stopped by main thread
 }
 return
 
+MainData:
+if(WorkerThread.State = "Running" || WorkerThread.State = "Paused")
+	WorkerThread.SendData("Data from main thread") ;We can pass arbitrary data between the threads
+return
 ;The functions below are event handlers of the main thread. They were specified above.
 OnPausedByWorker(WorkerThread)
 {
@@ -83,6 +92,7 @@ OnStoppedByWorker(WorkerThread, Result)
 	GuiControl, Enable, MainStart
 	GuiControl, Disable, MainPause
 	GuiControl, Disable, MainStop
+	GuiControl, Disable, MainData
 	Gui, Show,, Stopped by worker thread! Result: %Result%
 }
 OnFinish(WorkerThread, Result)
@@ -92,6 +102,11 @@ OnFinish(WorkerThread, Result)
 	GuiControl, Enable, MainStart
 	GuiControl, Disable, MainPause
 	GuiControl, Disable, MainStop
+	GuiControl, Disable, MainData
+}
+OnDataFromWorker(WorkerThread, Data)
+{
+	MsgBox Data from worker: %Data%
 }
 
 ;Progress is a numeric integer value
@@ -107,28 +122,30 @@ ProgressHandler(WorkerThread, Progress)
 ;This function may have a many parameters as desired, but they need to be specified during the worker thread creation.
 WorkerFunction(WorkerThread, Param)
 {
-	global WorkerProgress, WorkerPause, WorkerStop
+	global WorkerProgress, WorkerPause, WorkerStop, WorkerData
 	;We can set up some event handlers for the worker thread here
 	;so it can react to pause/resume/stop events coming from the main thread
-	WorkerThread.OnPauseHandler.Handler := "OnPausedByMain"
-	WorkerThread.OnResumeHandler.Handler := "OnResumedByMain"
-	WorkerThread.OnStopHandler.Handler := "OnStoppedByMain"
+	WorkerThread.OnPause.Handler := "OnPausedByMain"
+	WorkerThread.OnResume.Handler := "OnResumedByMain"
+	WorkerThread.OnStop.Handler := "OnStoppedByMain"
+	WorkerThread.OnData.Handler := "OnDataFromMain"
 	Gui, Add, Progress, vWorkerProgress w400, 0
 	Gui, Add, Button, vWorkerPause gWorkerPause w50, Pause
 	Gui, Add, Button, vWorkerStop gWorkerStop x+10, Stop
+	Gui, Add, Button, vWorkerData gWorkerData x+10, Send Data
 	Gui, +LabelWorkerGUI
 	Gui, Show,, Passed Parameter: %Param%
-	
 	;This is a suggested structure for a worker thread that uses a loop.
 	;It properly accounts for state changes (which can be caused by the main thread or this thread)
 	while(A_Index < 100 && WorkerThread.State = "Running")
 	{
 		GuiControl,,WorkerProgress, %A_Index%
-		Sleep 100 ;This simulates work that takes some time
+		Sleep 40 ;This simulates work that takes some time
 		WorkerThread.Progress := A_Index ;Report the progress of the worker thread.
 		while(WorkerThread.State = "Paused") ;Optionally wait a while for resuming the worker thread.
 			Sleep 10
 	}
+	Gui, Destroy
 	;the return value of this function is only used when the worker thread wasn't stopped.
 	return 42
 }
@@ -155,8 +172,13 @@ WorkerStop:
 if(WorkerThread.State = "Running" || WorkerThread.State = "Paused")
 {
 	WorkerThread.Stop(23) ;Parameter is passed back to main thread as result
-	GuiControl, Disable, WorkerStop
+	Gui, Destroy
 }
+return
+
+WorkerData:
+if(WorkerThread.State = "Running" || WorkerThread.State = "Paused")
+	WorkerThread.SendData("Data from worker thread!") ;We can send arbitrary data between threads!
 return
 
 ;The functions below are event handlers of the worker thread. They were specified above.
@@ -175,6 +197,10 @@ OnResumedByMain()
 OnStoppedByMain(reason)
 {
 	Msgbox Stopped by main thread! Reason: %reason%
+}
+OnDataFromMain(Data)
+{
+	Msgbox Data from main thread: %Data%
 }
 
 #include <WorkerThread>

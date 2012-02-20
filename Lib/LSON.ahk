@@ -66,8 +66,8 @@ LSON_Deserialize( _text, lobj = "", tpos = "" )
         text := SubStr(_text, pos)
         if RegExMatch(text, "^""(?:\\.|[^""\\])*+""", token) ;string
             pos += StrLen(token), token := LSON_UnNormalize(token), tokentype := "string"
-        else if RegExMatch(text, "^\d++(?:\.\d++(?:e[\+\-]?\d++)?)?|0x[\da-fA-F]++", token) ; number
-            pos += StrLen(token), token := token+0, tokentype := "number"
+        else if RegExMatch(text, "^(?<neg>-?)\s*(?<num>0x[\da-fA-F]++|\d++(?:\.\d++(?:e[\+\-]?\d++)?)?)", token) ; number
+            pos += StrLen(token), token := (tokenNeg tokenNum) + 0, tokentype := "number"
         else if (mode = "key") && RegExmatch(text, "^[\w#@$]++", token) ;identifier
             pos += StrLen(token), token := token, tokentype := "identifier"
         else if RegExMatch(text, "^(?!\.)[\w#@$\.]+(?<!\.)(?=\(\))", token) { ;function
