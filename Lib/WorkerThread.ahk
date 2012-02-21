@@ -52,7 +52,7 @@
 			this.Task.CanStop := CanStop
 			this.Task.ExitAfterTask := ExitAfterTask
 			this.IsWorkerThread := false
-			loop 6
+			loop 4
 				OnMessage(this.Message + (A_Index - 1), "MainThread_Monitor")
 			OnMessage(0x4a, "MainThread_Monitor")
 		}
@@ -65,8 +65,8 @@
 			WinGet, PID, PID, ahk_id %A_ScriptHwnd%
 			this.WorkerID := PID
 			CWorkerThread.WorkerThread := this
-			loop 6
-				OnMessage(this.Message + (A_Index - 1), "WorkerThread_Monitor")
+			loop 2
+				OnMessage(this.Message + A_Index, "WorkerThread_Monitor")
 			OnMessage(0x4a, "WorkerThread_Monitor")
 			
 			SendMessage, this.Message, PID, A_ScriptHWND, ,% "ahk_id " this.MainHWND
@@ -104,9 +104,6 @@
 			this.State := "Running"
 		else ;Otherwise start new worker thread. Task is passed once the worker thread responds
 		{
-			;Write temporary file with object data (might be replaced with WM_COPYDATA later)
-			;~ FileDelete, %A_Temp%\Workerthread.lson
-			;~ FileAppend, % LSON(this.Task), %A_Temp%\Workerthread.lson
 			;Run the worker instance of this script. It will send back a start message with its window handle
 			run % (A_IsCompiled ? A_ScriptFullPath : A_AhkPath) (A_IsCompiled ? "" : " """ A_ScriptFullPath """") " -ActAsWorker: " A_ScriptHwnd, %A_ScriptDir%, UseErrorLevel, PID
 			if(!ErrorLevel)
@@ -196,7 +193,7 @@
 				DetectHiddenWindows_Prev := A_DetectHiddenWindows
 				DetectHiddenWindows, On
 				
-				PostMessage, CWorkerThread.Message + 4, this.WorkerID, Value,, % "ahk_id " this.MainHWND
+				PostMessage, CWorkerThread.Message + 3, this.WorkerID, Value,, % "ahk_id " this.MainHWND
 				
 				if(!DetectHiddenWindows_Prev)
 					DetectHiddenWindows, Off
@@ -212,9 +209,7 @@ type		msg (offset)	wParam	lParam
 Start		0				PID		hwnd (both of worker thread)
 Pause		1				PID
 Resume		2				PID
-Stop		3				PID		result (numeric, possibly an error code)
 Progress	4				PID		Progress value (numeric)
-Finish		5				PID		result (numeric, return value, error code, etc)
 */
 MainThread_Monitor(wParam, lParam, msg, hwnd)
 {
@@ -284,20 +279,8 @@ MainThread_Monitor(wParam, lParam, msg, hwnd)
 		WorkerThread.State := "Running"
 		WorkerThread.OnResume.(WorkerThread)
 	}
-	;~ else if(msg = WorkerThread.Message + 3) ;Stop
-	;~ {
-		;~ WorkerThread.State := "Stopped"
-		;~ WorkerThread.OnStop.(WorkerThread, lParam)
-		;~ CWorkerThread.Threads.Remove(WorkerThread.PID)
-	;~ }
-	else if(msg = WorkerThread.Message + 4) ;Progress (uses PostMessage for speed)
+	else if(msg = WorkerThread.Message + 3) ;Progress (uses PostMessage for speed)
 		WorkerThread.OnProgress.(WorkerThread, lParam)
-	;~ else if(msg = WorkerThread.Message + 5) ;Finish
-	;~ {
-		;~ WorkerThread.State := "Finished"
-		;~ WorkerThread.OnFinish.(WorkerThread, lParam)
-		;~ CWorkerThread.Threads.Remove(WorkerThread.PID)
-	;~ }
 }
 
 /*
@@ -306,7 +289,6 @@ type		msg (offset)	wParam	lParam
 WM_COPYDATA	0x4a								;Used for passing tasks, sending stop command and custom data
 Pause		1				
 Resume		2				
-Stop		3						reason (numeric)
 */
 WorkerThread_Monitor(wParam, lParam, msg, hwnd)
 {
@@ -338,7 +320,6 @@ WorkerThread_Monitor(wParam, lParam, msg, hwnd)
 			return true  ; Returning 1 (true) is the traditional way to acknowledge this message.
 		}
 	}
-	;~ msgbox % "worker thread: " wParam ", " lParam ", " (msg-CWorkerThread.Message)
 	if(msg = CWorkerThread.Message + 1) ;Pause
 	{
 		if(WorkerThread.Task.CanPause && WorkerThread.State = "Running")
@@ -355,14 +336,6 @@ WorkerThread_Monitor(wParam, lParam, msg, hwnd)
 			WorkerThread.OnResume.()
 		}
 	}
-	;~ else if(msg = CWorkerThread.Message + 3) ;Stop
-	;~ {
-		;~ if(WorkerThread.Task.CanStop && (WorkerThread.State = "Running" || WorkerThread.State = "Paused"))
-		;~ {
-			;~ WorkerThread.OnStop.(lParam)
-			;~ WorkerThread.State := "Stopped" ;State is set here, but the task itself needs to obey this!
-		;~ }
-	;~ }
 }
 
 ;Called from worker/main message handler so that OnStop doesn't block the message handling function.
@@ -463,8 +436,8 @@ InitWorkerThread()
 			WorkerThread.State := "Running"
 			
 			WorkerFunction := WorkerThread.Task.WorkerFunction
-			
 			result := %WorkerFunction%(WorkerThread, WorkerThread.Task.Parameters*)
+			
 			;if we are in stopped state, this thread was cancelled and no finish event is sent
 			if(WorkerThread.State != "Stopped")
 			{

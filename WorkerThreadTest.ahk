@@ -13,6 +13,7 @@ Gui, +LabelMainGUI
 Gui, Show
 
 ;Create the worker thread! It will be reused in this program to demonstrate the possibility
+;If the last parameter is set to 0, the worker thread will stay running and wait for tasks
 WorkerThread := new CWorkerThread("WorkerFunction", 1, 1, 1)
 
 ;Setup event handlers for the main thread
