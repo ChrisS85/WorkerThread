@@ -3,7 +3,7 @@
 	;Message number used for communication between main and worker threads.
 	;In total, 6 messages are used, starting from this value
 	static Message := 8742
-	static Threads := []
+	static Threads := {}
 	
 	;Public:
 	Task := "" ;Contains information about the task to be executed by the worker thread
@@ -93,7 +93,7 @@
 	Start(Parameters*)
 	{
 		if(this.State != "Stopped" && this.State != "Finished" || this.IsWorkerThread)
-			return
+			return 0
 		
 		this.Task.Parameters := Parameters
 		this.Progress := 0
@@ -109,9 +109,10 @@
 			if(!ErrorLevel)
 			{
 				this.WorkerID := PID
-				this.Threads[PID] := this
+				this.Threads["" + PID] := this
 			}
 		}
+		return 1
 	}
 	Pause()
 	{
@@ -208,6 +209,7 @@
 		Time := A_TickCount + Timeout * 1000
 		while(A_TickCount < Time && this.State != "Running")
 			Sleep 10
+		return this.State = "Running"
 	}
 }
 
@@ -223,15 +225,15 @@ MainThread_Monitor(wParam, lParam, msg, hwnd)
 {
 	if(msg = 0x4a) ;WM_COPYDATA
 	{
-		StringAddress := NumGet(lParam + 4 + A_PtrSize, 0, "PTR")
-		StringLength := DllCall("lstrlen", "PTR", StringAddress) * (A_IsUnicode ? 2 : 1)
+		StringAddress := NumGet(lParam + 2 * A_PtrSize, 0, "PTR")
+		StringLength := DllCall("lstrlen", "PTR", StringAddress, "int") * (A_IsUnicode ? 2 : 1)
 		if(StringLength <= 0)
 			return 0
 		else
 		{
 			CopyOfData := StrGet(NumGet(lParam + 2 * A_PtrSize))  ; Copy the string out of the structure.
 			Data := LSON(CopyOfData) ;By setting this the Worker loop can continue
-			WorkerThread := CWorkerThread.Threads[Data.PID]
+			WorkerThread := CWorkerThread.Threads["" + Data.PID]
 			if(!WorkerThread)
 				return 0
 			if(Data.Type = 1) ;Stop
@@ -255,7 +257,7 @@ MainThread_Monitor(wParam, lParam, msg, hwnd)
 		}
 	}
 	
-	WorkerThread := CWorkerThread.Threads[wParam]
+	WorkerThread := CWorkerThread.Threads["" + wParam]
 	if(!WorkerThread)
 		return
 	
@@ -305,8 +307,8 @@ WorkerThread_Monitor(wParam, lParam, msg, hwnd)
 		return 0
 	if(msg = 0x4a) ;WM_COPYDATA
 	{
-		StringAddress := NumGet(lParam + 4 + A_PtrSize, 0, "PTR")  ; lParam+8 is the address of CopyDataStruct's lpData member.
-		StringLength := DllCall("lstrlen", "PTR", StringAddress) * (A_IsUnicode ? 2 : 1)
+		StringAddress := NumGet(lParam + 2 * A_PtrSize, 0, "PTR")  ; lParam+8 is the address of CopyDataStruct's lpData member.
+		StringLength := DllCall("lstrlen", "PTR", StringAddress, "int") * (A_IsUnicode ? 2 : 1)
 		if(StringLength <= 0)
 			return 0
 		else
@@ -376,11 +378,12 @@ WorkerThread_OnStopOrFinish()
 				WorkerThread.OnFinish.(WorkerThread, WorkerThread.Result)
 			WorkerThread.Remove("Result")
 			if(WorkerThread.Task.ExitAfterTask)
-				RemovePIDs.Insert(pid)				
+				RemovePIDs.Insert(pid)
 		}
 	}
+
 	for i, pid in RemovePIDs
-		CWorkerThread.Threads.Remove(pid)
+		CWorkerThread.Threads.Remove("" + pid)
 }
 
 ;Called from worker/main message handler when custom data is received so that OnData doesn't block the message handling function.
@@ -424,14 +427,14 @@ WorkerThread_OnData()
 InitWorkerThread()
 {
 	global
-	local Params := [], WorkerFunction, result
+	local Params := [], WorkerFunction, result, DetectHiddenWindows_Prev
 	Loop %0%
 		Params[A_Index] := %A_Index%
 	DetectHiddenWindows_Prev := A_DetectHiddenWindows
 	DetectHiddenWindows, On
 	if(Params.MaxIndex() = 2 && Params[1] = "-ActAsWorker:" && WinExist("ahk_id " params[2]))
 	{
-		WorkerThread := new CWorkerThread(params[2])
+		WorkerThread := new CWorkerThread(params[2]) ;Avoid making the variable global if this code is not executed
 		if(!WorkerThread)
 			ExitApp
 		while(true)
@@ -442,10 +445,8 @@ InitWorkerThread()
 				continue
 			}
 			WorkerThread.State := "Running"
-			
 			WorkerFunction := WorkerThread.Task.WorkerFunction
 			result := %WorkerFunction%(WorkerThread, WorkerThread.Task.Parameters*)
-			
 			;if we are in stopped state, this thread was cancelled and no finish event is sent
 			if(WorkerThread.State != "Stopped")
 			{
@@ -469,10 +470,10 @@ Send_WM_COPYDATA(ByRef StringToSend, hwnd)  ; ByRef saves a little memory in thi
 ; This function sends the specified string to the specified window and returns the reply.
 ; The reply is 1 if the target window processed the message, or 0 if it ignored it.
 {
-    VarSetCapacity(CopyDataStruct, 4 + 2 * A_PtrSize, 0)  ; Set up the structure's memory area.
+    VarSetCapacity(CopyDataStruct, 3 * A_PtrSize, 0)  ; Set up the structure's memory area.
     ; First set the structure's cbData member to the size of the string, including its zero terminator:
     NumPut((StrLen(StringToSend) + 1) * (A_IsUnicode ? 2 : 1), CopyDataStruct, A_PtrSize)  ; OS requires that this be done.
-    NumPut(&StringToSend, CopyDataStruct, 4 + A_PtrSize)  ; Set lpData to point to the string itself.
+    NumPut(&StringToSend, CopyDataStruct, 2 * A_PtrSize)  ; Set lpData to point to the string itself.
 	return DllCall("SendMessage", "PTR", hwnd, "UInt", 0x4a, "PTR", 0, "PTR", &CopyDataStruct, "PTR")
 }
 #include <LSON>
