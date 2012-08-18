@@ -69,12 +69,21 @@
 				OnMessage(this.Message + A_Index, "WorkerThread_Monitor")
 			OnMessage(0x4a, "WorkerThread_Monitor")
 			
-			SendMessage, this.Message, PID, A_ScriptHWND, ,% "ahk_id " this.MainHWND
+			Loop 100
+			{
+				SendMessage, this.Message, PID, A_ScriptHWND, ,% "ahk_id " this.MainHWND
+				if(ErrorLevel = 1)
+					break
+				Sleep 100
+			}
 			if(!DetectHiddenWindows_Prev)
 				DetectHiddenWindows, Off
 			
 			if(ErrorLevel != 1) ;If there is an error, return an empty object so this instance can exit
+			{
+				outputdebug WT: Initialization error
 				return ""
+			}
 		}
 		if(!DetectHiddenWindows_Prev)
 			DetectHiddenWindows, Off
@@ -111,6 +120,8 @@
 				this.WorkerID := PID
 				this.Threads["" + PID] := this
 			}
+			else
+				outputdebug Error Starting worker thread
 		}
 		return 1
 	}
@@ -238,19 +249,21 @@ MainThread_Monitor(wParam, lParam, msg, hwnd)
 				return 0
 			if(Data.Type = 1) ;Stop
 			{
+				outputdebug % "Stop Message from " Data.PID " with Param[1]=" WorkerThread.Task.Parameters[1] ", status=" WorkerThread.State
 				WorkerThread.State := "Stopped"
 				WorkerThread.Result := Data.Result
 				SetTimer, WorkerThread_OnStop, -0
 			}
 			else if(Data.Type = 2) ;Finish
 			{
+				outputdebug % "Finish Message from " Data.PID " with Param[1]=" WorkerThread.Task.Parameters[1] ", status=" WorkerThread.State
 				WorkerThread.State := "Finished"
 				WorkerThread.Result := Data.Result
 				SetTimer, WorkerThread_OnFinish, -0
 			}
 			else if(Data.Type = 3) ;Data
 			{
-				WorkerThread.Data.Insert(Data.Data)
+				WorkerThread.Data.Insert(1, Data.Data) ;Queue like behavior so each OnData() event treats the data in chronological order
 				SetTimer, WorkerThread_OnData, -0
 			}
 			return true  ; Returning 1 (true) is the traditional way to acknowledge this message.
@@ -324,7 +337,7 @@ WorkerThread_Monitor(wParam, lParam, msg, hwnd)
 			}
 			else if(Data.Type = 3) ;Data
 			{
-				WorkerThread.Data.Insert(Data.Data)
+				WorkerThread.Data.Insert(1, Data.Data) ;Queue like behavior so each OnData() event treats the data in chronological order
 				SetTimer, WorkerThread_OnData, -0
 			}
 			return true  ; Returning 1 (true) is the traditional way to acknowledge this message.
@@ -367,11 +380,18 @@ return
 
 WorkerThread_OnStopOrFinish()
 {
+	outputdebug OnStopOrFinish beging
 	RemovePIDs := []
+	n := 0
+	nStopped := 0
 	for pid, WorkerThread in CWorkerThread.Threads
 	{
+		n++
 		if((WorkerThread.State = "Stopped" || WorkerThread.State = "Finished") && WorkerThread.HasKey("Result"))
 		{
+			if(WorkerThread.Task.ExitAfterTask)
+				CWorkerThread.Threads["" + pid] := "" ;Invalidate this thread to prevent the chance of threading problems in this function
+			nStopped++
 			if(WorkerThread.State = "Stopped")
 				WorkerThread.OnStop.(WorkerThread, WorkerThread.Result)
 			else
@@ -381,9 +401,10 @@ WorkerThread_OnStopOrFinish()
 				RemovePIDs.Insert(pid)
 		}
 	}
-
+	outputdebug WorkerThread_OnStopOrFinish(): %n% worker threads, %nStopped% were stopped in this function call
 	for i, pid in RemovePIDs
 		CWorkerThread.Threads.Remove("" + pid)
+	outputdebug OnStopOrFinish end
 }
 
 ;Called from worker/main message handler when custom data is received so that OnData doesn't block the message handling function.
@@ -434,9 +455,11 @@ InitWorkerThread()
 	DetectHiddenWindows, On
 	if(Params.MaxIndex() = 2 && Params[1] = "-ActAsWorker:" && WinExist("ahk_id " params[2]))
 	{
+		outputdebug WT: Running as worker thread
 		WorkerThread := new CWorkerThread(params[2]) ;Avoid making the variable global if this code is not executed
 		if(!WorkerThread)
 			ExitApp
+		outputdebug WT: Initialized
 		while(true)
 		{
 			if(!WorkerThread.Task) ;Still waiting for start
@@ -452,6 +475,7 @@ InitWorkerThread()
 			{
 				DetectHiddenWindows_Prev := A_DetectHiddenWindows
 				DetectHiddenWindows, On
+				outputdebug % "WT: send finish message to " WorkerThread.MainHWND
 				Send_WM_COPYDATA(LSON({Type : 2, PID : WorkerThread.WorkerID, Result : result}), WorkerThread.MainHWND)
 				if(!DetectHiddenWindows_Prev)
 					DetectHiddenWindows, Off
@@ -470,11 +494,18 @@ Send_WM_COPYDATA(ByRef StringToSend, hwnd)  ; ByRef saves a little memory in thi
 ; This function sends the specified string to the specified window and returns the reply.
 ; The reply is 1 if the target window processed the message, or 0 if it ignored it.
 {
-    VarSetCapacity(CopyDataStruct, 3 * A_PtrSize, 0)  ; Set up the structure's memory area.
-    ; First set the structure's cbData member to the size of the string, including its zero terminator:
-    NumPut((StrLen(StringToSend) + 1) * (A_IsUnicode ? 2 : 1), CopyDataStruct, A_PtrSize)  ; OS requires that this be done.
-    NumPut(&StringToSend, CopyDataStruct, 2 * A_PtrSize)  ; Set lpData to point to the string itself.
-	return DllCall("SendMessage", "PTR", hwnd, "UInt", 0x4a, "PTR", 0, "PTR", &CopyDataStruct, "PTR")
+	Loop 100
+	{
+	    VarSetCapacity(CopyDataStruct, 3 * A_PtrSize, 0)  ; Set up the structure's memory area.
+	    ; First set the structure's cbData member to the size of the string, including its zero terminator:
+	    NumPut((StrLen(StringToSend) + 1) * (A_IsUnicode ? 2 : 1), CopyDataStruct, A_PtrSize)  ; OS requires that this be done.
+	    NumPut(&StringToSend, CopyDataStruct, 2 * A_PtrSize)  ; Set lpData to point to the string itself.
+		result := DllCall("SendMessage", "PTR", hwnd, "UInt", 0x4a, "PTR", 0, "PTR", &CopyDataStruct, "PTR")
+		if(result)
+			return result
+		Sleep 100
+	}
+	return 0
 }
 #include <LSON>
 #include <EventHandler>
